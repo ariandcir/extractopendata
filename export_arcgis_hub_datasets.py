@@ -501,6 +501,38 @@ def export_datasets(
     return summary
 
 
+def list_datasets_mode(
+    page_size: int,
+    max_datasets: int | None,
+    include_id_regex: str | None,
+    include_title_regex: str | None,
+    list_format: str,
+    session,
+) -> dict[str, Any]:
+    discovered = list_datasets(session, PORTAL_URL, page_size)
+    include_id = compile_optional_regex(include_id_regex)
+    include_title = compile_optional_regex(include_title_regex)
+    datasets = filter_datasets(discovered, include_id, include_title)
+
+    if max_datasets is not None:
+        datasets = datasets[:max_datasets]
+
+    if list_format == "json":
+        print(json.dumps(datasets, indent=2))
+    else:
+        for index, dataset in enumerate(datasets, start=1):
+            dataset_id = str(dataset.get("id") or "")
+            title = str(dataset.get("title") or "")
+            service_url = str(dataset.get("service_url") or "")
+            print(f"{index}\t{dataset_id}\t{title}\t{service_url}")
+
+    return {
+        "mode": "list_datasets",
+        "discovered": len(discovered),
+        "selected": len(datasets),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", default=".interop/opendata-parquet", help="Directory to write parquet files")
@@ -520,6 +552,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-retries", default=4, type=int, help="HTTP retry attempts for transient errors")
     parser.add_argument("--backoff-factor", default=0.5, type=float, help="HTTP retry backoff factor")
     parser.add_argument("--summary-file", default=None, help="Optional JSON file path for structured run summary")
+    parser.add_argument(
+        "--list-datasets",
+        action="store_true",
+        help="List datasets after applying include filters, then exit without exporting parquet",
+    )
+    parser.add_argument(
+        "--list-format",
+        default="text",
+        choices=["text", "json"],
+        help="Output format for --list-datasets",
+    )
     return parser.parse_args()
 
 
@@ -527,19 +570,29 @@ def main() -> int:
     args = parse_args()
     try:
         session = build_session(args.max_retries, args.backoff_factor)
-        summary = export_datasets(
-            output_dir=Path(args.output_dir),
-            watermark_path=Path(args.watermark_file) if args.watermark_file else None,
-            hash_state_dir=Path(args.hash_state_dir),
-            page_size=args.page_size,
-            pause_seconds=args.pause_seconds,
-            max_datasets=args.max_datasets,
-            max_pages_per_dataset=args.max_pages_per_dataset,
-            include_id_regex=args.include_id_regex,
-            include_title_regex=args.include_title_regex,
-            upsert_key=args.upsert_key,
-            session=session,
-        )
+        if args.list_datasets:
+            summary = list_datasets_mode(
+                page_size=args.page_size,
+                max_datasets=args.max_datasets,
+                include_id_regex=args.include_id_regex,
+                include_title_regex=args.include_title_regex,
+                list_format=args.list_format,
+                session=session,
+            )
+        else:
+            summary = export_datasets(
+                output_dir=Path(args.output_dir),
+                watermark_path=Path(args.watermark_file) if args.watermark_file else None,
+                hash_state_dir=Path(args.hash_state_dir),
+                page_size=args.page_size,
+                pause_seconds=args.pause_seconds,
+                max_datasets=args.max_datasets,
+                max_pages_per_dataset=args.max_pages_per_dataset,
+                include_id_regex=args.include_id_regex,
+                include_title_regex=args.include_title_regex,
+                upsert_key=args.upsert_key,
+                session=session,
+            )
         if args.summary_file:
             summary_path = Path(args.summary_file)
             summary_path.parent.mkdir(parents=True, exist_ok=True)

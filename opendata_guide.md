@@ -46,6 +46,8 @@ Main options:
 - `--max-retries`: retry count for transient HTTP failures (429/5xx).
 - `--backoff-factor`: exponential backoff factor for retries.
 - `--summary-file`: write structured run summary JSON.
+- `--list-datasets`: discover + filter datasets and print them, then exit without exporting parquet.
+- `--list-format`: output format for `--list-datasets` (`text` or `json`).
 
 ## Query examples (covering all script aspects)
 
@@ -105,6 +107,24 @@ python3 scripts/export_arcgis_hub_datasets.py \
   --max-retries 6 \
   --backoff-factor 1.0 \
   --summary-file .interop/opendata-summary.json
+```
+
+### 7) List datasets directly from the script (no curl/jq)
+
+Text output:
+
+```bash
+python3 scripts/export_arcgis_hub_datasets.py \
+  --list-datasets \
+  --include-title-regex 'permit|license'
+```
+
+JSON output:
+
+```bash
+python3 scripts/export_arcgis_hub_datasets.py \
+  --list-datasets \
+  --list-format json
 ```
 
 ## ArcGIS layer `/query` examples used by the script
