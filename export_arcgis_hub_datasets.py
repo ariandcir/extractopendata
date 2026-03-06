@@ -113,6 +113,36 @@ def list_datasets(session, search_base_url: str, page_size: int) -> list[dict[st
     return datasets
 
 
+def normalize_layer_url(service_url: str) -> str:
+    normalized = service_url.rstrip("/")
+    if normalized.lower().endswith(("/mapserver", "/featureserver")):
+        normalized = f"{normalized}/0"
+    return normalized
+
+
+def build_single_dataset(session, service_url: str, dataset_id: str | None, title: str | None) -> dict[str, Any]:
+    layer_url = normalize_layer_url(service_url)
+    layer_meta = get_layer_metadata(session, layer_url)
+
+    resolved_id = dataset_id
+    if not resolved_id and isinstance(layer_meta, dict):
+        resolved_id = str(layer_meta.get("id") or "")
+    if not resolved_id:
+        resolved_id = slugify(layer_url)
+
+    resolved_title = title
+    if not resolved_title and isinstance(layer_meta, dict):
+        resolved_title = str(layer_meta.get("name") or "").strip()
+    if not resolved_title:
+        resolved_title = f"Dataset {resolved_id}"
+
+    return {
+        "id": resolved_id,
+        "title": resolved_title,
+        "service_url": layer_url,
+    }
+
+
 def get_layer_metadata(session, layer_url: str) -> dict[str, Any] | None:
     try:
         return request_json(session, layer_url, params={"f": "json"})
@@ -122,7 +152,7 @@ def get_layer_metadata(session, layer_url: str) -> dict[str, Any] | None:
 
 def is_queryable_layer(layer_meta: dict[str, Any] | None) -> bool:
     if not layer_meta:
-        return False
+        return True
 
     capabilities = str(layer_meta.get("capabilities", "")).lower()
     type_name = str(layer_meta.get("type", "")).lower()
@@ -339,6 +369,9 @@ def export_datasets(
     include_id_regex: str | None,
     include_title_regex: str | None,
     upsert_key: str | None,
+    service_url: str | None,
+    dataset_id: str | None,
+    dataset_title: str | None,
     session,
 ) -> dict[str, Any]:
     try:
@@ -346,11 +379,16 @@ def export_datasets(
     except ModuleNotFoundError as exc:
         raise RuntimeError("Missing dependency: install pandas and pyarrow (pip install pandas pyarrow)") from exc
 
-    discovered = list_datasets(session, PORTAL_URL, page_size)
-    include_id = compile_optional_regex(include_id_regex)
-    include_title = compile_optional_regex(include_title_regex)
-    datasets = filter_datasets(discovered, include_id, include_title)
-    print(f"Discovered {len(discovered)} dataset candidates; selected {len(datasets)}")
+    if service_url:
+        discovered = []
+        datasets = [build_single_dataset(session, service_url, dataset_id, dataset_title)]
+        print("Running in single-dataset mode")
+    else:
+        discovered = list_datasets(session, PORTAL_URL, page_size)
+        include_id = compile_optional_regex(include_id_regex)
+        include_title = compile_optional_regex(include_title_regex)
+        datasets = filter_datasets(discovered, include_id, include_title)
+        print(f"Discovered {len(discovered)} dataset candidates; selected {len(datasets)}")
 
     state_enabled = watermark_path is not None
     watermarks = load_watermarks(watermark_path) if state_enabled and watermark_path else {}
@@ -380,7 +418,9 @@ def export_datasets(
         print(f"[{index}/{len(datasets)}] {title} ({dataset_id})")
 
         layer_meta = get_layer_metadata(session, layer_url)
-        if not is_queryable_layer(layer_meta):
+        if layer_meta is None:
+            print("  - warning: could not verify layer metadata; attempting query anyway")
+        elif not is_queryable_layer(layer_meta):
             print("  - skipped: layer does not appear queryable")
             summary["skipped"] += 1
             continue
@@ -549,6 +589,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-id-regex", default=None, help="Only process datasets whose id matches this regex")
     parser.add_argument("--include-title-regex", default=None, help="Only process datasets whose title matches this regex")
     parser.add_argument("--upsert-key", default=None, help="Optional key column used to upsert during hash fallback")
+    parser.add_argument(
+        "--service-url",
+        default=None,
+        help="Optional ArcGIS layer URL to query directly (for example .../MapServer/0)",
+    )
+    parser.add_argument("--dataset-id", default=None, help="Optional dataset id override when --service-url is used")
+    parser.add_argument("--dataset-title", default=None, help="Optional dataset title override when --service-url is used")
     parser.add_argument("--max-retries", default=4, type=int, help="HTTP retry attempts for transient errors")
     parser.add_argument("--backoff-factor", default=0.5, type=float, help="HTTP retry backoff factor")
     parser.add_argument("--summary-file", default=None, help="Optional JSON file path for structured run summary")
@@ -591,6 +638,9 @@ def main() -> int:
                 include_id_regex=args.include_id_regex,
                 include_title_regex=args.include_title_regex,
                 upsert_key=args.upsert_key,
+                service_url=args.service_url,
+                dataset_id=args.dataset_id,
+                dataset_title=args.dataset_title,
                 session=session,
             )
         if args.summary_file:

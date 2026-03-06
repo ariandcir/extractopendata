@@ -43,6 +43,9 @@ Main options:
 - `--include-id-regex`: only process datasets whose ids match the regex.
 - `--include-title-regex`: only process datasets whose titles match the regex.
 - `--upsert-key`: when hash fallback is active, merge changed rows into existing parquet by this key.
+- `--service-url`: query a specific ArcGIS layer URL directly (for example `.../FeatureServer/0`).
+- `--dataset-id`: optional id override when using `--service-url`.
+- `--dataset-title`: optional title override when using `--service-url`.
 - `--max-retries`: retry count for transient HTTP failures (429/5xx).
 - `--backoff-factor`: exponential backoff factor for retries.
 - `--summary-file`: write structured run summary JSON.
@@ -126,6 +129,18 @@ python3 scripts/export_arcgis_hub_datasets.py \
   --list-datasets \
   --list-format json
 ```
+
+### 8) Extract from a direct ArcGIS FeatureServer/MapServer layer URL
+
+```bash
+python3 export_arcgis_hub_datasets.py \
+  --service-url 'https://services7.arcgis.com/xNUwUjOJqYE54USz/arcgis/rest/services/Most_Visited_Locations/FeatureServer/0' \
+  --dataset-title 'Most Visited Locations' \
+  --output-dir .interop/opendata-parquet \
+  --summary-file .interop/most-visited-summary.json
+```
+
+This bypasses portal discovery and queries only that layer.
 
 ## ArcGIS layer `/query` examples used by the script
 
